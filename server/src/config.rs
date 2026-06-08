@@ -1,9 +1,5 @@
 use std::env;
 
-/// Runtime configuration loaded from environment variables (and optional .env file).
-///
-/// All fields are validated at startup so the server fails fast instead of
-/// panicking on the first request that needs a missing value.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// HTTP port to bind (default: 21465, matching the wppconnect default)
@@ -12,6 +8,12 @@ pub struct Config {
     pub secret_key: String,
     /// Base directory where per-session SQLite databases are stored
     pub sessions_dir: String,
+    /// Oracle DB username
+    pub db_user: String,
+    /// Oracle DB password
+    pub db_pass: String,
+    /// Oracle DB connect string (e.g. `//host:1521/service`)
+    pub db_url: String,
 }
 
 impl Config {
@@ -28,10 +30,10 @@ impl Config {
 
         let sessions_dir = env::var("SESSIONS_DIR").unwrap_or_else(|_| "./sessions".to_string());
 
-        Self {
-            port,
-            secret_key,
-            sessions_dir,
-        }
+        let db_user = env::var("DB_USER").unwrap_or_default();
+        let db_pass = env::var("DB_PASS").unwrap_or_default();
+        let db_url = env::var("DB_URL").unwrap_or_default();
+
+        Self { port, secret_key, sessions_dir, db_user, db_pass, db_url }
     }
 }

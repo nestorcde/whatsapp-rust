@@ -1,9 +1,18 @@
 mod config;
+mod oracle;
 mod routes;
+mod session_manager;
+mod state;
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use tracing::info;
+
+use crate::{
+    oracle::OracleConfig,
+    session_manager::SessionManager,
+    state::AppState,
+};
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +25,21 @@ async fn main() {
 
     let cfg = config::Config::from_env();
 
-    let app = routes::router();
+    let oracle = Arc::new(OracleConfig {
+        user: cfg.db_user.clone(),
+        password: cfg.db_pass.clone(),
+        url: cfg.db_url.clone(),
+    });
+
+    let sessions = SessionManager::new(&cfg.sessions_dir);
+
+    let state = AppState {
+        sessions,
+        oracle,
+        config: Arc::new(cfg.clone()),
+    };
+
+    let app = routes::router(state);
 
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.port)
         .parse()

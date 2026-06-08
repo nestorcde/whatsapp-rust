@@ -381,6 +381,7 @@ Estos son los endpoints más críticos del negocio. La implementación replica e
 #### Validación de número de teléfono
 
 Portar la función `formatAndValidateWhatsAppNumber` del TS:
+
 1. Limpiar número (trim, quitar `@...`)
 2. Validar con crate `phonenumber`
 3. Formatear a E.164 sin `+`
@@ -511,22 +512,23 @@ El mapeo `userKey → email` se configura en `config.rs` a partir de env vars (o
 - [x] `/healthz` responde 200, `/api/ping` responde "pong"
 - [x] `cargo build -p whatsapp-rust-server` exitoso (1 warning inofensivo de dead_code esperado)
 
-### Checklist Fase 2 — Session Manager
+### Checklist Fase 2 — Session Manager ✅
 
-- [ ] `SessionEntry` definido con status + qr_string
-- [ ] `SessionManager` implementado
-- [ ] Mecanismo de eventos del Client identificado e integrado
-- [ ] Inyectado como estado Axum
+- [x] `SessionEntry` definido con status + qr_string (Arcs compartidos)
+- [x] `SessionManager` implementado con `Mutex<HashMap<String, SessionEntry>>`
+- [x] Eventos del Client identificados e integrados: PairingQrCode, Connected, Disconnected, LoggedOut
+- [x] `SessionRef` (cloneable) como handle público para los handlers
+- [x] Inyectado como `Arc<SessionManager>` en `AppState` → estado Axum
 
-### Checklist Fase 3 — Oracle
+### Checklist Fase 3 — Oracle ✅
 
-- [ ] Oracle Instant Client disponible en servidor
-- [ ] `get_connection()` funcionando
-- [ ] `upsert_oficial_token()` implementado y testeado
-- [ ] `update_qr_code()` implementado
-- [ ] `get_pending_messages()` implementado
-- [ ] `get_resend_messages()` implementado
-- [ ] `update_msg_status()` implementado
+- [ ] Oracle Instant Client disponible en servidor (verificar en deploy)
+- [x] `OracleConfig::connect()` + patrón spawn_blocking por operación
+- [x] `upsert_oficial_token()` implementado (mirrors `buscaOficial`/`updateOficial`/`insertOficial`)
+- [x] `update_qr_code()` implementado (HEXTORAW, mirrors `updateQrCode`)
+- [x] `get_pending_messages()` implementado (SQL exacto de `sendMessageGx`)
+- [x] `get_resend_messages()` implementado (SQL exacto de `resendMessageGx` con filtro `veces`)
+- [x] `update_msg_status()` implementado (mirrors `updateMsg`)
 
 ### Checklist Fase 4 — Auth
 

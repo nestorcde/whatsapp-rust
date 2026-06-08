@@ -32,5 +32,12 @@ whatsapp-rust-tokio-transport   = { path = "../transports/tokio-transport" }
 whatsapp-rust-ureq-http-client  = { path = "../http_clients/ureq-client" }
 wacore          = { workspace = true }
 
+# Oracle DB (sync crate — all queries run inside tokio::task::spawn_blocking)
+# Requires Oracle Instant Client installed at runtime.
+oracle          = "0.5"
+
+# Error handling
+anyhow          = { workspace = true }
+
 [lints]
 workspace = true
