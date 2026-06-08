@@ -1,0 +1,36 @@
+[package]
+name = "whatsapp-rust-server"
+version = "0.1.0"
+edition = "2024"
+description = "HTTP API server exposing whatsapp-rust as a REST service (wppconnect-compatible endpoints)"
+
+[[bin]]
+name = "whatsapp-rust-server"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP
+axum            = { version = "0.8", features = ["macros"] }
+tower-http      = { version = "0.6", features = ["cors", "trace"] }
+tokio           = { workspace = true, features = ["full"] }
+
+# Serialization
+serde           = { workspace = true }
+serde_json      = { workspace = true, features = ["std"] }
+
+# Config / env
+dotenvy         = "0.15"
+
+# Logging / tracing
+tracing         = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# WhatsApp client
+whatsapp-rust   = { path = "../", features = ["tokio-native", "sqlite-storage", "tokio-transport", "ureq-client", "signal"] }
+whatsapp-rust-sqlite-storage    = { path = "../storages/sqlite-storage" }
+whatsapp-rust-tokio-transport   = { path = "../transports/tokio-transport" }
+whatsapp-rust-ureq-http-client  = { path = "../http_clients/ureq-client" }
+wacore          = { workspace = true }
+
+[lints]
+workspace = true

@@ -6,8 +6,11 @@
 /.vscode
 /*.db*
 .env
-docs
+# docs/ is tracked (contains implementation plans)
 .claude
+*.tgz
+entities.json
+mempalace.yaml
 __pycache__
 .codex
 dhat-heap*.json
