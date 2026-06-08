@@ -39,6 +39,10 @@ oracle          = "0.5"
 # Auth
 bcrypt          = "0.15"
 
+# QR code image generation
+qrcode          = { version = "0.14", features = ["image"] }
+image           = { version = "0.25", default-features = false, features = ["png"] }
+
 # Error handling
 anyhow          = { workspace = true }
 
