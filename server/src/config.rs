@@ -14,6 +14,8 @@ pub struct Config {
     pub db_pass: String,
     /// Oracle DB connect string (e.g. `//host:1521/service`)
     pub db_url: String,
+    /// Secret key for Google Contacts API endpoints (plain comparison)
+    pub google_contacts_secret_key: String,
 }
 
 impl Config {
@@ -33,7 +35,9 @@ impl Config {
         let db_user = env::var("DB_USER").unwrap_or_default();
         let db_pass = env::var("DB_PASS").unwrap_or_default();
         let db_url = env::var("DB_URL").unwrap_or_default();
+        let google_contacts_secret_key =
+            env::var("GOOGLE_CONTACTS_SECRET_KEY").unwrap_or_default();
 
-        Self { port, secret_key, sessions_dir, db_user, db_pass, db_url }
+        Self { port, secret_key, sessions_dir, db_user, db_pass, db_url, google_contacts_secret_key }
     }
 }

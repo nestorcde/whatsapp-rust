@@ -1,4 +1,5 @@
 mod config;
+mod middleware;
 mod oracle;
 mod routes;
 mod session_manager;

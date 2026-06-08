@@ -36,6 +36,9 @@ wacore          = { workspace = true }
 # Requires Oracle Instant Client installed at runtime.
 oracle          = "0.5"
 
+# Auth
+bcrypt          = "0.15"
+
 # Error handling
 anyhow          = { workspace = true }
 
