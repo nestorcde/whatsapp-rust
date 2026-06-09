@@ -52,6 +52,12 @@ phonenumber     = "0.3"
 # Random delays
 rand            = { workspace = true }
 
+# Lexical similarity
+strsim          = "0.11"
+
+# OpenAI (lexical similarity generation/rewrite)
+async-openai    = "0.27"
+
 # Error handling
 anyhow          = { workspace = true }
 

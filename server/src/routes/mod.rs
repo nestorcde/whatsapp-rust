@@ -9,6 +9,7 @@ use crate::{middleware::auth, state::AppState};
 
 pub mod messages_gx;
 pub mod session;
+pub mod similarity;
 
 pub fn router(state: AppState) -> Router {
     // Routes that require Bearer token auth.
@@ -24,6 +25,10 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
+        .route(
+            "/api/validate-lexical-similarity",
+            post(similarity::validate_lexical_similarity),
+        )
         // No-auth session routes (secretkey validated inline).
         .route(
             "/api/{session}/{secretkey}/generate-token",
