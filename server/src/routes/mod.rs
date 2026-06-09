@@ -7,6 +7,7 @@ use axum::{
 
 use crate::{middleware::auth, state::AppState};
 
+pub mod messages_gx;
 pub mod session;
 
 pub fn router(state: AppState) -> Router {
@@ -14,6 +15,8 @@ pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/{session}/start-session", post(session::start_session))
         .route("/api/{session}/status-session", get(session::status_session))
+        .route("/api/{session}/send-message-gx", post(messages_gx::send_message_gx))
+        .route("/api/{session}/resend-message-gx", post(messages_gx::resend_message_gx))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::verify_token,
