@@ -12,6 +12,8 @@ use waproto::whatsapp as wa;
 use whatsapp_rust::{Client, Jid, UploadOptions};
 
 use crate::{
+    config::Config,
+    google::{auth as gauth, people},
     oracle::{self, MsgRow, OracleConfig},
     session_manager::{SessionRef, SessionStatus},
     state::AppState,
@@ -64,6 +66,7 @@ pub async fn send_message_gx(
     let whacrecod = body.whacrecod.clone();
     let sender = body.sender.clone();
     let oracle = state.oracle.clone();
+    let config = state.config.clone();
     let seg_ret_dsd = body.seg_ret_dsd;
     let seg_ret_hst = body.seg_ret_hst;
     let cantidad = body.cantidad;
@@ -71,7 +74,7 @@ pub async fn send_message_gx(
     tokio::spawn(async move {
         match oracle::get_pending_messages(oracle.clone(), whacrecod.clone(), sender, cantidad).await {
             Ok(rows) => {
-                process_rows(rows, session_ref, oracle, whacrecod, seg_ret_dsd, seg_ret_hst, false).await;
+                process_rows(rows, session_ref, oracle, config, whacrecod, seg_ret_dsd, seg_ret_hst, false).await;
             }
             Err(e) => tracing::error!("get_pending_messages: {e}"),
         }
@@ -102,6 +105,7 @@ pub async fn resend_message_gx(
     let whacrecod = body.whacrecod.clone();
     let sender = body.sender.clone();
     let oracle = state.oracle.clone();
+    let config = state.config.clone();
     let seg_ret_dsd = body.seg_ret_dsd;
     let seg_ret_hst = body.seg_ret_hst;
     let cantidad = body.cantidad;
@@ -110,7 +114,7 @@ pub async fn resend_message_gx(
     tokio::spawn(async move {
         match oracle::get_resend_messages(oracle.clone(), whacrecod.clone(), sender, cantidad, veces).await {
             Ok(rows) => {
-                process_rows(rows, session_ref, oracle, whacrecod, seg_ret_dsd, seg_ret_hst, true).await;
+                process_rows(rows, session_ref, oracle, config, whacrecod, seg_ret_dsd, seg_ret_hst, true).await;
             }
             Err(e) => tracing::error!("get_resend_messages: {e}"),
         }
@@ -130,6 +134,7 @@ async fn process_rows(
     rows: Vec<MsgRow>,
     session_ref: SessionRef,
     oracle: Arc<OracleConfig>,
+    config: Arc<Config>,
     whacrecod: String,
     seg_ret_dsd: u64,
     seg_ret_hst: u64,
@@ -144,6 +149,24 @@ async fn process_rows(
                 continue;
             }
         };
+
+        // Auto-register contact in Google Contacts (fire-and-forget).
+        {
+            let cfg = config.clone();
+            let e164 = format!("+{}", phone.trim_end_matches("@c.us"));
+            let name = row.nombre.clone();
+            tokio::spawn(async move {
+                let creds = gauth::credentials_from_config(&cfg);
+                match gauth::get_valid_token_with_creds(&cfg.google_contacts_token_dir, "default", &creds).await {
+                    Ok(token) => {
+                        if let Err(e) = people::upsert_contact(&token, &name, &e164).await {
+                            tracing::debug!("google upsert '{}': {e}", e164);
+                        }
+                    }
+                    Err(e) => tracing::debug!("google token unavailable: {e}"),
+                }
+            });
+        }
 
         let jid: Jid = match phone.parse() {
             Ok(j) => j,

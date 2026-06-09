@@ -22,6 +22,7 @@ impl OracleConfig {
 pub struct MsgRow {
     pub secuencia: i32,
     pub numero: String,
+    pub nombre: String,
     pub msg: String,
     pub msg2: Option<String>,
     pub msg3: Option<String>,
@@ -38,7 +39,7 @@ pub struct MsgRow {
 // ── SQL constants (mirrors messageController.ts queries exactly) ──────────────
 
 const SQL_PENDING: &str = "
-    SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero,
+    SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero, trim(B.WHACRENOMBRE) AS nombre,
         CASE WHEN length(trim(B.WHACREMSGIND)) > 0 THEN trim(B.WHACREMSGIND)
              ELSE CASE WHEN length(trim(A.WHACRESLD)) > 0
                   THEN concat(trim(A.WHACRESLD), CONCAT(' ', concat(trim(B.WHACRENOMBRE), CONCAT(', ', trim(A.WHACREMSG)))))
@@ -61,7 +62,7 @@ const SQL_PENDING: &str = "
       AND A.WHACRECOD = :1 AND trim(A.WHACREOFI) = :2 AND rownum <= :3";
 
 const SQL_RESEND: &str = "
-    SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero,
+    SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero, trim(B.WHACRENOMBRE) AS nombre,
         CASE WHEN length(trim(B.WHACREMSGIND)) > 0 THEN trim(B.WHACREMSGIND)
              ELSE CASE WHEN length(trim(A.WHACRESLD)) > 0
                   THEN concat(trim(A.WHACRESLD), CONCAT(' ', concat(trim(B.WHACRENOMBRE), CONCAT(', ', trim(A.WHACREMSG)))))
@@ -106,6 +107,7 @@ fn collect_msg_rows(mut rs: oracle::ResultSet<oracle::Row>) -> Result<Vec<MsgRow
         rows.push(MsgRow {
             secuencia: row.get("SECUENCIA")?,
             numero: row.get("NUMERO")?,
+            nombre: row.get::<_, Option<String>>("NOMBRE")?.unwrap_or_default(),
             msg: row.get::<_, Option<String>>("MSG")?.unwrap_or_default(),
             msg2: optional_str(&row, "MSG2"),
             msg3: optional_str(&row, "MSG3"),

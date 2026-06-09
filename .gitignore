@@ -16,3 +16,7 @@ __pycache__
 dhat-heap*.json
 /qr.png
 /sessions/
+/google-tokens/
+/server/google-tokens/
+/google-contacts-tokens/
+auth_url.txt
