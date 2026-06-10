@@ -23,6 +23,7 @@ pub struct MsgRow {
     pub secuencia: i32,
     pub numero: String,
     pub nombre: String,
+    pub socnro: Option<f64>,
     pub msg: String,
     pub msg2: Option<String>,
     pub msg3: Option<String>,
@@ -40,6 +41,7 @@ pub struct MsgRow {
 
 const SQL_PENDING: &str = "
     SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero, trim(B.WHACRENOMBRE) AS nombre,
+        B.WHACRESOCNRO AS socnro,
         CASE WHEN length(trim(B.WHACREMSGIND)) > 0 THEN trim(B.WHACREMSGIND)
              ELSE CASE WHEN length(trim(A.WHACRESLD)) > 0
                   THEN concat(trim(A.WHACRESLD), CONCAT(' ', concat(trim(B.WHACRENOMBRE), CONCAT(', ', trim(A.WHACREMSG)))))
@@ -63,6 +65,7 @@ const SQL_PENDING: &str = "
 
 const SQL_RESEND: &str = "
     SELECT B.WHACRESEC AS secuencia, B.WHACRENROTEL AS numero, trim(B.WHACRENOMBRE) AS nombre,
+        B.WHACRESOCNRO AS socnro,
         CASE WHEN length(trim(B.WHACREMSGIND)) > 0 THEN trim(B.WHACREMSGIND)
              ELSE CASE WHEN length(trim(A.WHACRESLD)) > 0
                   THEN concat(trim(A.WHACRESLD), CONCAT(' ', concat(trim(B.WHACRENOMBRE), CONCAT(', ', trim(A.WHACREMSG)))))
@@ -108,6 +111,7 @@ fn collect_msg_rows(mut rs: oracle::ResultSet<oracle::Row>) -> Result<Vec<MsgRow
             secuencia: row.get("SECUENCIA")?,
             numero: row.get("NUMERO")?,
             nombre: row.get::<_, Option<String>>("NOMBRE")?.unwrap_or_default(),
+            socnro: row.get::<_, Option<f64>>("SOCNRO").ok().flatten(),
             msg: row.get::<_, Option<String>>("MSG")?.unwrap_or_default(),
             msg2: optional_str(&row, "MSG2"),
             msg3: optional_str(&row, "MSG3"),
@@ -242,6 +246,19 @@ pub async fn insert_whatn002(cfg: Arc<OracleConfig>, row: Whatn002Row) -> Result
                 &row.mimetype,
                 &row.mediadata,
             ],
+        )?;
+        conn.commit().context("commit failed")
+    })
+    .await?
+}
+
+/// Update WHAOFIESTADO in WHATN003 ('CONECTADO' on connect, 'DESCONECTADO' on logout).
+pub async fn update_oficial_status(cfg: Arc<OracleConfig>, session: String, estado: String) -> Result<()> {
+    task::spawn_blocking(move || {
+        let conn = cfg.connect()?;
+        conn.execute(
+            "UPDATE WHATN003 SET WHAOFIESTADO=:1 WHERE trim(WHAOFICOD)=:2",
+            &[&estado, &session],
         )?;
         conn.commit().context("commit failed")
     })

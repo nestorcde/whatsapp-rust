@@ -10,6 +10,7 @@ const PEOPLE_API: &str = "https://people.googleapis.com/v1";
 #[derive(Debug)]
 pub struct ContactInfo {
     pub resource_name: String,
+    pub etag: String,
     pub display_name: String,
     pub phones: Vec<String>,
 }
@@ -44,6 +45,7 @@ fn normalize_phone(raw: &str) -> Option<String> {
 
 fn contact_from_value(conn: &Value) -> Option<ContactInfo> {
     let resource_name = conn["resourceName"].as_str()?.to_string();
+    let etag = conn["etag"].as_str().unwrap_or("").to_string();
     let display_name = conn["names"]
         .as_array()
         .and_then(|n| n.first())
@@ -63,7 +65,7 @@ fn contact_from_value(conn: &Value) -> Option<ContactInfo> {
                 .collect()
         })
         .unwrap_or_default();
-    Some(ContactInfo { resource_name, display_name, phones })
+    Some(ContactInfo { resource_name, etag, display_name, phones })
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
@@ -132,20 +134,32 @@ pub async fn find_contact_by_phone(token: &Token, phone: &str) -> Result<Option<
     Ok(found)
 }
 
-/// Create contact only if no existing contact has the same E.164 phone number.
+/// Create-or-update: creates if phone not found; updates name if the existing
+/// contact's name is blank or looks like a phone number (legacy buggy data).
 pub async fn upsert_contact(token: &Token, name: &str, phone: &str) -> Result<()> {
     let normalized = normalize_phone(phone).context("Invalid phone")?;
     let contacts = list_all_contacts(token).await?;
-    let exists = contacts.iter().any(|c| {
+    let existing = contacts.into_iter().find(|c| {
         c.phones
             .iter()
             .filter_map(|p| normalize_phone(p))
             .any(|p| p == normalized)
     });
-    if !exists {
-        create_contact(token, name, &normalized).await?;
+
+    match existing {
+        None => {
+            create_contact(token, name, &normalized).await?;
+        }
+        Some(contact) if !name.is_empty() && name_needs_update(&contact.display_name, name) => {
+            update_contact_name(token, &contact.resource_name, &contact.etag, name).await?;
+        }
+        _ => {}
     }
     Ok(())
+}
+
+fn name_needs_update(display_name: &str, new_name: &str) -> bool {
+    display_name.trim() != new_name.trim()
 }
 
 /// Create a new Google Contact.
@@ -153,10 +167,37 @@ pub async fn create_contact(token: &Token, name: &str, phone: &str) -> Result<Va
     let client = reqwest::Client::new();
     let mut body = serde_json::json!({ "phoneNumbers": [{ "value": phone }] });
     if !name.is_empty() {
-        body["names"] = serde_json::json!([{ "displayName": name }]);
+        body["names"] = serde_json::json!([{ "givenName": name }]);
     }
     let data: Value = client
         .post(format!("{PEOPLE_API}/people:createContact"))
+        .bearer_auth(&token.access_token)
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(data)
+}
+
+/// Update the name of an existing contact (requires etag for optimistic locking).
+pub async fn update_contact_name(
+    token: &Token,
+    resource_name: &str,
+    etag: &str,
+    name: &str,
+) -> Result<Value> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{PEOPLE_API}/{resource_name}:updateContact?updatePersonFields=names"
+    );
+    let body = serde_json::json!({
+        "etag": etag,
+        "names": [{ "givenName": name }]
+    });
+    let data: Value = client
+        .patch(&url)
         .bearer_auth(&token.access_token)
         .json(&body)
         .send()

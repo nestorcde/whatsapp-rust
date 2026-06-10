@@ -156,8 +156,9 @@ async fn process_rows(
     whacrecod: String,
     seg_ret_dsd: u64,
     seg_ret_hst: u64,
-    is_resend: bool,
+    _is_resend: bool,
 ) {
+    let mut turno: u8 = 0;
     for row in rows {
         let phone = match format_phone(&row.numero) {
             Ok(p) => p,
@@ -172,7 +173,10 @@ async fn process_rows(
         {
             let cfg = config.clone();
             let e164 = format!("+{}", phone.trim_end_matches("@c.us"));
-            let name = row.nombre.clone();
+            let name = match row.socnro {
+                Some(v) if v > 0.0 => format!("{} - {}", row.nombre, format_socnro(v)),
+                _ => row.nombre.clone(),
+            };
             tokio::spawn(async move {
                 let creds = gauth::credentials_from_config(&cfg);
                 match gauth::get_valid_token_with_creds(&cfg.google_contacts_token_dir, "default", &creds).await {
@@ -195,7 +199,7 @@ async fn process_rows(
             }
         };
 
-        let (text, img_opt) = pick_content(&row, is_resend);
+        let (text, img_opt) = pick_content(&row, &mut turno);
         let result = if let Some(img) = img_opt {
             send_image_with_retry(&session_ref.client, &jid, img, &text, 2).await
         } else {
@@ -228,19 +232,39 @@ async fn process_rows(
 
 // ── Content selection (turno logic) ──────────────────────────────────────────
 
-/// pick_content selects message text and optional image blob.
-/// send: turno 0 → msg + img1
-/// resend: turno 1 → msg2/img2 if flag set, else turno 2 → msg3/img3, else turno 0
-fn pick_content(row: &MsgRow, is_resend: bool) -> (String, Option<Vec<u8>>) {
-    if is_resend && row.msg2_chk == 1 {
-        let img = if row.img2_chk == 1 { row.img2.clone() } else { None };
-        (row.msg2.clone().unwrap_or_else(|| row.msg.clone()), img)
-    } else if is_resend && row.msg3_chk == 1 {
-        let img = if row.img3_chk == 1 { row.img3.clone() } else { None };
-        (row.msg3.clone().unwrap_or_else(|| row.msg.clone()), img)
-    } else {
+/// Mirrors the original turno rotation: `turno` persists across the whole batch
+/// so each successive contact gets the next message variant (msg1→msg2→msg3→msg1…).
+/// If neither MSG2CHK nor MSG3CHK is set, msg1 is always used regardless of turno.
+fn pick_content(row: &MsgRow, turno: &mut u8) -> (String, Option<Vec<u8>>) {
+    if row.msg2_chk != 1 && row.msg3_chk != 1 {
         let img = if row.img1_chk == 1 { row.img1.clone() } else { None };
-        (row.msg.clone(), img)
+        return (row.msg.clone(), img);
+    }
+
+    match *turno {
+        0 => {
+            let img = if row.img1_chk == 1 { row.img1.clone() } else { None };
+            *turno = 1;
+            (row.msg.clone(), img)
+        }
+        1 => {
+            if row.msg2_chk == 1 {
+                let img = if row.img2_chk == 1 { row.img2.clone() } else { None };
+                *turno = if row.msg3_chk == 1 { 2 } else { 0 };
+                (row.msg2.clone().unwrap_or_else(|| row.msg.clone()), img)
+            } else {
+                // msg2 not enabled, skip to msg3
+                let img = if row.img3_chk == 1 { row.img3.clone() } else { None };
+                *turno = 0;
+                (row.msg3.clone().unwrap_or_else(|| row.msg.clone()), img)
+            }
+        }
+        _ => {
+            // turno == 2
+            let img = if row.img3_chk == 1 { row.img3.clone() } else { None };
+            *turno = 0;
+            (row.msg3.clone().unwrap_or_else(|| row.msg.clone()), img)
+        }
     }
 }
 
@@ -343,6 +367,15 @@ async fn send_image_with_retry(
         }
     }
     Ok(())
+}
+
+// ── Socnro formatting ─────────────────────────────────────────────────────────
+
+/// Formats WHACRESOCNRO (e.g. 322620) as "32-262/0".
+/// Rule: integer DD_DDD_D → "DD-DDD/D".
+fn format_socnro(val: f64) -> String {
+    let n = val.round() as u64;
+    format!("{:02}-{:03}/{}", n / 10000, (n % 10000) / 10, n % 10)
 }
 
 // ── Oracle status update helper ───────────────────────────────────────────────

@@ -143,7 +143,7 @@ impl SessionManager {
                                 let ts = format_oracle_now();
                                 tokio::spawn(async move {
                                     let row = Whatn002Row {
-                                        ofi,
+                                        ofi: ofi.clone(),
                                         nro_origen: String::new(),
                                         nro_dest: String::new(),
                                         mensaje: String::new(),
@@ -154,8 +154,11 @@ impl SessionManager {
                                         mimetype: String::new(),
                                         mediadata: String::new(),
                                     };
-                                    if let Err(e) = oracle::insert_whatn002(oracle, row).await {
+                                    if let Err(e) = oracle::insert_whatn002(oracle.clone(), row).await {
                                         tracing::warn!("WHATN002 INI: {e}");
+                                    }
+                                    if let Err(e) = oracle::update_oficial_status(oracle, ofi, "CONECTADO".to_string()).await {
+                                        tracing::warn!("WHATN003 CONECTADO: {e}");
                                     }
                                 });
                             }
@@ -172,7 +175,7 @@ impl SessionManager {
                                 let ts = format_oracle_now();
                                 tokio::spawn(async move {
                                     let row = Whatn002Row {
-                                        ofi,
+                                        ofi: ofi.clone(),
                                         nro_origen: String::new(),
                                         nro_dest: String::new(),
                                         mensaje: "SESSION CERRADA POR EL OFICIAL!!".to_string(),
@@ -183,8 +186,11 @@ impl SessionManager {
                                         mimetype: String::new(),
                                         mediadata: String::new(),
                                     };
-                                    if let Err(e) = oracle::insert_whatn002(oracle, row).await {
+                                    if let Err(e) = oracle::insert_whatn002(oracle.clone(), row).await {
                                         tracing::warn!("WHATN002 DES: {e}");
+                                    }
+                                    if let Err(e) = oracle::update_oficial_status(oracle, ofi, "DESCONECTADO".to_string()).await {
+                                        tracing::warn!("WHATN003 DESCONECTADO: {e}");
                                     }
                                 });
                             }
