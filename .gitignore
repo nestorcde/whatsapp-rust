@@ -20,3 +20,4 @@ dhat-heap*.json
 /server/google-tokens/
 /google-contacts-tokens/
 auth_url.txt
+/wppconnect-server-prod/
