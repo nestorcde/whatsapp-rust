@@ -18,6 +18,8 @@ pub struct Config {
     pub google_contacts_secret_key: String,
     /// OpenAI API key for message generation/rewriting (validate-lexical-similarity)
     pub openai_api_key: String,
+    /// OpenAI model name (default: gpt-3.5-turbo)
+    pub openai_model: String,
     /// Directory for storing per-userKey Google OAuth2 credentials and tokens
     pub google_contacts_token_dir: String,
     /// Google OAuth2 client ID (from Google Cloud Console)
@@ -48,12 +50,13 @@ impl Config {
         let google_contacts_secret_key =
             env::var("GOOGLE_CONTACTS_SECRET_KEY").unwrap_or_default();
         let openai_api_key = env::var("OPENAI_API_KEY").unwrap_or_default();
+        let openai_model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
         let google_contacts_token_dir =
             env::var("GOOGLE_CONTACTS_TOKEN_DIR").unwrap_or_else(|_| "./google-tokens".to_string());
         let google_client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
         let google_client_secret = env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
         let google_redirect_uri = env::var("GOOGLE_REDIRECT_URI").unwrap_or_default();
 
-        Self { port, secret_key, sessions_dir, db_user, db_pass, db_url, google_contacts_secret_key, openai_api_key, google_contacts_token_dir, google_client_id, google_client_secret, google_redirect_uri }
+        Self { port, secret_key, sessions_dir, db_user, db_pass, db_url, google_contacts_secret_key, openai_api_key, openai_model, google_contacts_token_dir, google_client_id, google_client_secret, google_redirect_uri }
     }
 }

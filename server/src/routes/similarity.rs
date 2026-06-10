@@ -1,5 +1,4 @@
 use axum::{
-    Json,
     extract::State,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
@@ -24,16 +23,54 @@ fn default_umbral() -> f64 {
     70.0
 }
 
+/// Fixes `"umbralSimilitud": 30,00` (Spanish decimal comma) → `"umbralSimilitud": 30.00`
+/// before JSON parsing, so the body doesn't fail as invalid JSON.
+fn fix_spanish_decimal(raw: &str) -> String {
+    const KEY: &str = "\"umbralSimilitud\":";
+    let Some(key_pos) = raw.find(KEY) else {
+        return raw.to_string();
+    };
+    let after_key_pos = key_pos + KEY.len();
+    let after_key = &raw[after_key_pos..];
+    let ws_len = after_key.len() - after_key.trim_start_matches(|c: char| c.is_ascii_whitespace()).len();
+    let num_pos = after_key_pos + ws_len;
+
+    let num_bytes = raw[num_pos..].as_bytes();
+    let mut i = 0;
+    while i < num_bytes.len() && (num_bytes[i].is_ascii_digit() || num_bytes[i] == b',') {
+        i += 1;
+    }
+    if i == 0 || !raw[num_pos..num_pos + i].contains(',') {
+        return raw.to_string();
+    }
+    format!(
+        "{}{}{}",
+        &raw[..num_pos],
+        raw[num_pos..num_pos + i].replace(',', "."),
+        &raw[num_pos + i..]
+    )
+}
+
 /// POST /api/validate-lexical-similarity  (no auth required)
 pub async fn validate_lexical_similarity(
     State(state): State<AppState>,
-    Json(body): Json<ValidateSimilarityBody>,
+    raw: axum::body::Bytes,
 ) -> Response {
+    let raw_str = String::from_utf8_lossy(&raw);
+    let fixed = fix_spanish_decimal(&raw_str);
+    let body: ValidateSimilarityBody = match serde_json::from_str(&fixed) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("validate-lexical-similarity bad JSON: {e} — body: {raw_str}");
+            return (StatusCode::BAD_REQUEST, format!("JSON inválido: {e}")).into_response();
+        }
+    };
     let umbral = body.umbral_similitud.clamp(0.0, 100.0);
     let api_key = state.config.openai_api_key.clone();
+    let model = state.config.openai_model.clone();
 
     // Fill any missing messages via OpenAI (or return error if key not set)
-    let (m1, m2, m3) = match fill_messages(body.mensaje1, body.mensaje2, body.mensaje3, &api_key).await {
+    let (m1, m2, m3) = match fill_messages(body.mensaje1, body.mensaje2, body.mensaje3, &api_key, &model).await {
         Ok(msgs) => msgs,
         Err(e) => return error_xml(&format!("Error generando mensajes: {e}")),
     };
@@ -47,24 +84,40 @@ pub async fn validate_lexical_similarity(
     let cumple_23 = sim_23 <= umbral;
     let cumple_all = cumple_12 && cumple_13 && cumple_23;
 
-    // If any pair fails and the threshold is meaningful, ask OpenAI to rewrite
-    let recomendaciones = if !cumple_all && umbral >= 30.0 && !api_key.is_empty() {
-        match rewrite_messages(&m1, &m2, &m3, umbral, &api_key).await {
-            Ok(rec) => Some(rec),
-            Err(e) => {
-                tracing::warn!("rewrite_messages failed: {e}");
-                None
+    // If any pair fails, try to rewrite via OpenAI; fall back to originals if unavailable.
+    let recomendaciones = if !cumple_all {
+        let rec = if umbral >= 30.0 && !api_key.is_empty() {
+            match rewrite_messages(&m1, &m2, &m3, umbral, &api_key, &model).await {
+                Ok(rec) => rec,
+                Err(e) => {
+                    tracing::warn!("rewrite_messages failed (using originals): {e}");
+                    (m1.clone(), m2.clone(), m3.clone())
+                }
             }
-        }
+        } else {
+            (m1.clone(), m2.clone(), m3.clone())
+        };
+        Some(rec)
     } else {
         None
     };
 
+    // Re-analyse rewritten messages to populate SimilitudesNuevas and final CumpleValidacion.
+    let (new_sim_12, new_sim_13, new_sim_23, cumple_final) = match &recomendaciones {
+        Some((r1, r2, r3)) => {
+            let s12 = similarity_pct(r1, r2);
+            let s13 = similarity_pct(r1, r3);
+            let s23 = similarity_pct(r2, r3);
+            let cumple = cumple_all || (s12 <= umbral && s13 <= umbral && s23 <= umbral);
+            (s12, s13, s23, cumple)
+        }
+        None => (sim_12, sim_13, sim_23, cumple_all),
+    };
+
     let xml = build_xml(
-        umbral, &m1, &m2, &m3,
-        sim_12, sim_13, sim_23,
-        cumple_12, cumple_13, cumple_23,
-        cumple_all,
+        umbral,
+        new_sim_12, new_sim_13, new_sim_23,
+        cumple_final,
         recomendaciones.as_ref(),
     );
 
@@ -82,7 +135,7 @@ fn similarity_pct(a: &str, b: &str) -> f64 {
 
 // ── OpenAI calls ──────────────────────────────────────────────────────────────
 
-async fn call_openai(api_key: &str, prompt: &str) -> anyhow::Result<String> {
+async fn call_openai(api_key: &str, model: &str, prompt: &str) -> anyhow::Result<String> {
     use async_openai::{
         Client,
         config::OpenAIConfig,
@@ -98,7 +151,7 @@ async fn call_openai(api_key: &str, prompt: &str) -> anyhow::Result<String> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let request = CreateChatCompletionRequestArgs::default()
-        .model("gpt-4o-mini")
+        .model(model)
         .messages(vec![user_msg.into()])
         .build()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -124,6 +177,7 @@ async fn fill_messages(
     m2: Option<String>,
     m3: Option<String>,
     api_key: &str,
+    model: &str,
 ) -> anyhow::Result<(String, String, String)> {
     let m1 = m1.unwrap_or_default();
     let m2 = m2.unwrap_or_default();
@@ -157,7 +211,7 @@ async fn fill_messages(
         existing.join(" | ")
     );
 
-    let response = call_openai(api_key, &prompt).await?;
+    let response = call_openai(api_key, model, &prompt).await?;
     let mut lines = response.lines().filter(|l| !l.trim().is_empty());
 
     let m1_out = if m1.is_empty() {
@@ -185,6 +239,7 @@ async fn rewrite_messages(
     m3: &str,
     umbral: f64,
     api_key: &str,
+    model: &str,
 ) -> anyhow::Result<(String, String, String)> {
     let prompt = format!(
         "Reescribe los siguientes 3 mensajes de marketing para WhatsApp de manera que la \
@@ -194,11 +249,8 @@ async fn rewrite_messages(
         Devuelve EXACTAMENTE 3 mensajes, uno por línea, sin numeración ni explicaciones."
     );
 
-    let response = call_openai(api_key, &prompt).await?;
-    let mut lines = response
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(3);
+    let response = call_openai(api_key, model, &prompt).await?;
+    let mut lines = response.lines().filter(|l| !l.trim().is_empty()).take(3);
 
     let r1 = lines.next().unwrap_or(m1).trim().to_string();
     let r2 = lines.next().unwrap_or(m2).trim().to_string();
@@ -211,82 +263,52 @@ async fn rewrite_messages(
 
 fn build_xml(
     umbral: f64,
-    m1: &str,
-    m2: &str,
-    m3: &str,
     sim_12: f64,
     sim_13: f64,
     sim_23: f64,
-    cumple_12: bool,
-    cumple_13: bool,
-    cumple_23: bool,
     cumple_all: bool,
     recomendaciones: Option<&(String, String, String)>,
 ) -> String {
-    let rec_cumple = recomendaciones.map_or(false, |(r1, r2, r3)| {
-        similarity_pct(r1, r2) <= umbral
-            && similarity_pct(r1, r3) <= umbral
-            && similarity_pct(r2, r3) <= umbral
-    });
+    let cumple_validacion = if cumple_all { "true" } else { "false" };
 
-    let cumple_final = cumple_all || rec_cumple;
-
-    let rec_xml = recomendaciones.map_or(String::new(), |(r1, r2, r3)| {
-        format!(
-            "\n    <recomendaciones>\
-            \n      <mensaje1>{}</mensaje1>\
-            \n      <mensaje2>{}</mensaje2>\
-            \n      <mensaje3>{}</mensaje3>\
-            \n      <cumpleValidacion>{rec_cumple}</cumpleValidacion>\
-            \n    </recomendaciones>",
-            xml_escape(r1),
-            xml_escape(r2),
-            xml_escape(r3),
-        )
-    });
+    let (r1, r2, r3) = recomendaciones
+        .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+        .unwrap_or(("", "", ""));
 
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<response>\n\
-  <status>SUCCESS</status>\n\
-  <message>Validación completada</message>\n\
-  <data>\n\
-    <cumpleValidacion>{cumple_final}</cumpleValidacion>\n\
-    <umbralConfigurado>{umbral:.0}</umbralConfigurado>\n\
-    <mensajes>\n\
-      <mensaje1>{}</mensaje1>\n\
-      <mensaje2>{}</mensaje2>\n\
-      <mensaje3>{}</mensaje3>\n\
-    </mensajes>\n\
-    <comparaciones>\n\
-      <comparacion>\n\
-        <mensajes>Mensaje 1 vs Mensaje 2</mensajes>\n\
-        <similitud>{sim_12:.1}</similitud>\n\
-        <cumpleUmbral>{cumple_12}</cumpleUmbral>\n\
-      </comparacion>\n\
-      <comparacion>\n\
-        <mensajes>Mensaje 1 vs Mensaje 3</mensajes>\n\
-        <similitud>{sim_13:.1}</similitud>\n\
-        <cumpleUmbral>{cumple_13}</cumpleUmbral>\n\
-      </comparacion>\n\
-      <comparacion>\n\
-        <mensajes>Mensaje 2 vs Mensaje 3</mensajes>\n\
-        <similitud>{sim_23:.1}</similitud>\n\
-        <cumpleUmbral>{cumple_23}</cumpleUmbral>\n\
-      </comparacion>\n\
-    </comparaciones>{rec_xml}\n\
-  </data>\n\
-</response>",
-        xml_escape(m1),
-        xml_escape(m2),
-        xml_escape(m3),
+<ValidacionSimilitud xmlns=\"Nucleo\">\n\
+  <Estado>SUCCESS</Estado>\n\
+  <Mensaje>Validacion completada</Mensaje>\n\
+  <Resultado>\n\
+    <CumpleValidacion>{cumple_validacion}</CumpleValidacion>\n\
+    <UmbralConfigurado>{umbral:.0}</UmbralConfigurado>\n\
+    <Comparaciones/>\n\
+    <Recomendaciones>\n\
+      <Mensaje1Reescrito>{}</Mensaje1Reescrito>\n\
+      <Mensaje2Reescrito>{}</Mensaje2Reescrito>\n\
+      <Mensaje3Reescrito>{}</Mensaje3Reescrito>\n\
+      <SimilitudesNuevas>\n\
+        <Similitud1vs2>{sim_12:.1}</Similitud1vs2>\n\
+        <Similitud1vs3>{sim_13:.1}</Similitud1vs3>\n\
+        <Similitud2vs3>{sim_23:.1}</Similitud2vs3>\n\
+      </SimilitudesNuevas>\n\
+    </Recomendaciones>\n\
+  </Resultado>\n\
+</ValidacionSimilitud>",
+        xml_escape(r1),
+        xml_escape(r2),
+        xml_escape(r3),
     )
 }
 
 fn error_xml(msg: &str) -> Response {
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<response><status>ERROR</status><message>{}</message></response>",
+<ValidacionSimilitud xmlns=\"Nucleo\">\
+<Estado>ERROR</Estado>\
+<Mensaje>{}</Mensaje>\
+</ValidacionSimilitud>",
         xml_escape(msg)
     );
     (
