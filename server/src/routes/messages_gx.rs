@@ -90,9 +90,11 @@ pub async fn send_message_gx(
     let cantidad = body.cantidad;
 
     tokio::spawn(async move {
-        match oracle::get_pending_messages(oracle.clone(), whacrecod.clone(), sender, cantidad).await {
+        tracing::info!("WhaCreCod: {} - WhaCreOfi: {} - Cantidad: {} - segRetDsd: {} - segRetHst: {}",
+                       whacrecod, sender, cantidad, seg_ret_dsd, seg_ret_hst);
+        match oracle::get_pending_messages(oracle.clone(), whacrecod.clone(), sender.clone(), cantidad).await {
             Ok(rows) => {
-                process_rows(rows, session_ref, oracle, config, whacrecod, seg_ret_dsd, seg_ret_hst, false).await;
+                process_rows(rows, session_ref, oracle, config, whacrecod, sender, seg_ret_dsd, seg_ret_hst, false).await;
             }
             Err(e) => tracing::error!("get_pending_messages: {e}"),
         }
@@ -130,9 +132,11 @@ pub async fn resend_message_gx(
     let veces = body.veces;
 
     tokio::spawn(async move {
-        match oracle::get_resend_messages(oracle.clone(), whacrecod.clone(), sender, cantidad, veces).await {
+        tracing::info!("WhaCreCod: {} - WhaCreOfi: {} - Cantidad: {} - segRetDsd: {} - segRetHst: {} - Veces: {}",
+                       whacrecod, sender, cantidad, seg_ret_dsd, seg_ret_hst, veces);
+        match oracle::get_resend_messages(oracle.clone(), whacrecod.clone(), sender.clone(), cantidad, veces).await {
             Ok(rows) => {
-                process_rows(rows, session_ref, oracle, config, whacrecod, seg_ret_dsd, seg_ret_hst, true).await;
+                process_rows(rows, session_ref, oracle, config, whacrecod, sender, seg_ret_dsd, seg_ret_hst, true).await;
             }
             Err(e) => tracing::error!("get_resend_messages: {e}"),
         }
@@ -154,12 +158,15 @@ async fn process_rows(
     oracle: Arc<OracleConfig>,
     config: Arc<Config>,
     whacrecod: String,
+    sender: String,
     seg_ret_dsd: u64,
     seg_ret_hst: u64,
     _is_resend: bool,
 ) {
     let mut turno: u8 = 0;
     for row in rows {
+        tracing::info!("MSG: {} - NUMERO: {} - INSTANCIA: {}", row.msg, row.numero, sender);
+
         let phone = match format_phone(&row.numero) {
             Ok(p) => p,
             Err(e) => {
@@ -200,13 +207,18 @@ async fn process_rows(
         };
 
         let (text, img_opt) = pick_content(&row, &mut turno);
+        let con_imagen = img_opt.is_some();
+        tracing::info!("[DEBUG] Justo antes de enviar - phonenumber: \"{phone}\", con_imagen: {con_imagen}, secuencia: {}", row.secuencia);
         let result = if let Some(img) = img_opt {
             send_image_with_retry(&session_ref.client, &jid, img, &text, 2).await
         } else {
             send_text_with_retry(&session_ref.client, &jid, &text, 2).await
         };
 
-        let estado = if result.is_ok() { "ENV" } else {
+        let estado = if result.is_ok() {
+            tracing::info!("✓ Mensaje enviado exitosamente a {phone}");
+            "ENV"
+        } else {
             if let Err(ref e) = result {
                 tracing::error!("send failed (sec={}): {e}", row.secuencia);
             }
@@ -224,6 +236,7 @@ async fn process_rows(
                 seg_ret_dsd
             };
             if delay > 0 {
+                tracing::info!("El siguiente mensaje se enviará después de {delay} segundos");
                 tokio::time::sleep(Duration::from_secs(delay)).await;
             }
         }
