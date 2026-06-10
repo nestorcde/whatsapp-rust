@@ -33,7 +33,7 @@ async fn main() {
         url: cfg.db_url.clone(),
     });
 
-    let sessions = SessionManager::new(&cfg.sessions_dir);
+    let sessions = SessionManager::new(&cfg.sessions_dir, oracle.clone());
 
     let state = AppState {
         sessions,

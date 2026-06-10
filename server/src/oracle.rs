@@ -207,6 +207,75 @@ pub async fn get_resend_messages(
     .await?
 }
 
+/// Data for a single WHATN002 history row (INI/DES/MSG).
+pub struct Whatn002Row {
+    pub ofi: String,
+    pub nro_origen: String,
+    pub nro_dest: String,
+    pub mensaje: String,
+    pub fecha_hora: String,
+    pub propio: i32,
+    pub tipo: String,
+    pub has_media: i32,
+    pub mimetype: String,
+    pub mediadata: String,
+}
+
+/// Insert a row into WHATN002 (session/message history).
+pub async fn insert_whatn002(cfg: Arc<OracleConfig>, row: Whatn002Row) -> Result<()> {
+    task::spawn_blocking(move || {
+        let conn = cfg.connect()?;
+        conn.execute(
+            "INSERT INTO WHATN002 \
+             (WHARESOFI, WHARESNROORIGEN, WHARESNRODEST, WHARESMENSAJE, WHARESHORAFECHA, \
+              WHARESPROPIO, WHARESTIPO, WHARESHASMEDIA, WHARESMIMETYPE, WHARESMEDIADATA) \
+             VALUES (:1,:2,:3,:4,TO_DATE(:5,'YYYY-MM-DD HH24:MI:SS'),:6,:7,:8,:9,:10)",
+            &[
+                &row.ofi,
+                &row.nro_origen,
+                &row.nro_dest,
+                &row.mensaje,
+                &row.fecha_hora,
+                &row.propio,
+                &row.tipo,
+                &row.has_media,
+                &row.mimetype,
+                &row.mediadata,
+            ],
+        )?;
+        conn.commit().context("commit failed")
+    })
+    .await?
+}
+
+/// After a MSG insert, increment WHACRECNTINT on the most-recent ENV row
+/// in WHATN0011 whose phone matches `numero_cliente` and office matches `ofi`.
+pub async fn increment_whacrecntint(
+    cfg: Arc<OracleConfig>,
+    ofi: String,
+    numero_cliente: String,
+) -> Result<()> {
+    task::spawn_blocking(move || {
+        let conn = cfg.connect()?;
+        conn.execute(
+            "UPDATE WHATN0011 SET WHACRECNTINT = WHACRECNTINT + 1 \
+             WHERE ROWID = ( \
+               SELECT B.ROWID FROM WHATN001 A, WHATN0011 B \
+               WHERE A.WHACRECOD = B.WHACRECOD \
+                 AND TRIM(A.WHACREOFI) = :1 \
+                 AND (TRIM(B.WHACRENROTEL) = :2 \
+                      OR '+' || TRIM(B.WHACRENROTEL) = :2) \
+                 AND B.WHACREMSGEST = 'ENV' \
+               ORDER BY B.WHACRECOD DESC \
+               FETCH FIRST 1 ROWS ONLY \
+             )",
+            &[&ofi, &numero_cliente],
+        )?;
+        conn.commit().context("commit failed")
+    })
+    .await?
+}
+
 /// Update message delivery status (`"ENV"` = sent, `"FAL"` = failed) in WHATN0011.
 pub async fn update_msg_status(
     cfg: Arc<OracleConfig>,
