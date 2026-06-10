@@ -1,5 +1,4 @@
 use axum::{
-    Json,
     extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
@@ -10,10 +9,13 @@ use crate::{oracle, session_manager::SessionStatus, state::AppState};
 
 // --- shared helpers ---
 
+fn text_plain(body: String) -> Response {
+    (StatusCode::OK, [(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
+}
+
 fn session_xml(status_str: &str, urlcode: &str) -> Response {
     let xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
-<response><status>{status_str}</status><urlcode>{urlcode}</urlcode><version>1.0.0</version></response>"
+        "<root><status>{status_str}</status><urlcode>{urlcode}</urlcode><version>1.0.0</version></root>"
     );
     (
         StatusCode::OK,
@@ -26,8 +28,8 @@ fn session_xml(status_str: &str, urlcode: &str) -> Response {
 fn status_label(st: &SessionStatus) -> &'static str {
     match st {
         SessionStatus::Closed => "CLOSED",
-        SessionStatus::Starting => "STARTING",
-        SessionStatus::WaitingQr => "WAITING_QR",
+        SessionStatus::Starting => "INITIALIZING",
+        SessionStatus::WaitingQr => "QRCODE",
         SessionStatus::Connected => "CONNECTED",
     }
 }
@@ -69,7 +71,12 @@ pub async fn generate_token(
     }
 
     let full = format!("{session}:{token}");
-    Json(json!({ "status": "Success", "session": session, "token": token, "full": full }))
+    let body = json!({ "status": "Success", "session": session, "token": token, "full": full }).to_string();
+    (
+        StatusCode::CREATED,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        body,
+    )
         .into_response()
 }
 
@@ -84,7 +91,7 @@ pub async fn show_all_sessions(
         return (StatusCode::UNAUTHORIZED, "Invalid secret key").into_response();
     }
     let sessions = state.sessions.list_all().await;
-    Json(json!({ "response": sessions })).into_response()
+    axum::Json(json!({ "response": sessions })).into_response()
 }
 
 // --- start-session ---
@@ -115,14 +122,14 @@ pub async fn status_session(
     headers: HeaderMap,
 ) -> Response {
     let Some(session_ref) = state.sessions.get(&session).await else {
-        return Json(json!({ "status": "CLOSED", "qrcode": null })).into_response();
+        return text_plain(json!({ "status": "CLOSED", "qrcode": null }).to_string());
     };
 
     let st = session_ref.status.read().await.clone();
     let qr = session_ref.qr_string.read().await.clone();
 
     if st == SessionStatus::Closed {
-        return Json(json!({ "status": "CLOSED", "qrcode": null })).into_response();
+        return text_plain(json!({ "status": "CLOSED", "qrcode": null }).to_string());
     }
 
     if let Some(ref qr_str) = qr {
@@ -133,11 +140,14 @@ pub async fn status_session(
             .to_owned();
 
         if !whacrecod.is_empty() {
-            let qr_hex: String = qr_str.bytes().map(|b| format!("{b:02X}")).collect();
-            if let Err(e) =
-                oracle::update_qr_code(state.oracle.clone(), whacrecod, qr_hex).await
-            {
-                tracing::warn!("update_qr_code failed: {e}");
+            let qr_data = qr_str.clone();
+            if let Ok(Ok(png)) = tokio::task::spawn_blocking(move || render_qr_png(qr_data)).await {
+                let qr_hex: String = png.iter().map(|b| format!("{b:02X}")).collect();
+                if let Err(e) =
+                    oracle::update_qr_code(state.oracle.clone(), whacrecod, qr_hex).await
+                {
+                    tracing::warn!("update_qr_code failed: {e}");
+                }
             }
         }
     }
@@ -157,14 +167,14 @@ pub async fn qrcode_session(
     }
 
     let Some(session_ref) = state.sessions.get(&session).await else {
-        return Json(json!({ "status": "CLOSED", "qrcode": null })).into_response();
+        return text_plain(json!({ "status": "CLOSED", "qrcode": null }).to_string());
     };
 
     let qr = session_ref.qr_string.read().await.clone();
     let st = session_ref.status.read().await.clone();
 
     let Some(qr_str) = qr else {
-        return Json(json!({ "status": status_label(&st), "qrcode": null })).into_response();
+        return text_plain(json!({ "status": status_label(&st), "qrcode": null }).to_string());
     };
 
     match tokio::task::spawn_blocking(move || render_qr_png(qr_str)).await {

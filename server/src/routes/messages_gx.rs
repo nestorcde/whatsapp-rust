@@ -19,10 +19,27 @@ use crate::{
     state::AppState,
 };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Genexus sends whacrecod as a bare integer (no quotes). Accept both.
+fn deser_string_or_int<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        _ => Err(D::Error::custom("expected string or number for whacrecod")),
+    }
+}
+
 // ── Request bodies ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct SendGxBody {
+    #[serde(deserialize_with = "deser_string_or_int")]
     pub whacrecod: String,
     pub sender: String,
     #[serde(default)]
@@ -35,6 +52,7 @@ pub struct SendGxBody {
 
 #[derive(Deserialize)]
 pub struct ResendGxBody {
+    #[serde(deserialize_with = "deser_string_or_int")]
     pub whacrecod: String,
     pub sender: String,
     #[serde(default)]
