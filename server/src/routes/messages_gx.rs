@@ -179,7 +179,7 @@ async fn process_rows(
         // Auto-register contact in Google Contacts (fire-and-forget).
         {
             let cfg = config.clone();
-            let e164 = format!("+{}", phone.trim_end_matches("@c.us"));
+            let e164 = format!("+{}", phone.trim_end_matches("@s.whatsapp.net"));
             let name = match row.socnro {
                 Some(v) if v > 0.0 => format!("{} - {}", row.nombre, format_socnro(v)),
                 _ => row.nombre.clone(),
@@ -314,7 +314,7 @@ fn format_phone(raw: &str) -> anyhow::Result<String> {
         .to_string();
     let number = e164.trim_start_matches('+');
 
-    Ok(format!("{number}@c.us"))
+    Ok(format!("{number}@s.whatsapp.net"))
 }
 
 // ── Send helpers with retry ───────────────────────────────────────────────────
