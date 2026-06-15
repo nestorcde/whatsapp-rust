@@ -164,6 +164,7 @@ async fn process_rows(
     _is_resend: bool,
 ) {
     let mut turno: u8 = 0;
+    tracing::info!("Filas a procesar: {}", rows.len());
     for row in rows {
         tracing::info!("MSG: {} - NUMERO: {} - INSTANCIA: {}", row.msg, row.numero, sender);
 
@@ -206,8 +207,14 @@ async fn process_rows(
             }
         };
 
+        let turno_antes = turno;
         let (text, img_opt) = pick_content(&row, &mut turno);
         let con_imagen = img_opt.is_some();
+        tracing::info!(
+            "turno: {} → {} | msg2_chk={} msg3_chk={} | msg_sel='{}'",
+            turno_antes, turno, row.msg2_chk, row.msg3_chk,
+            text.chars().take(60).collect::<String>()
+        );
         tracing::info!("[DEBUG] Justo antes de enviar - phonenumber: \"{phone}\", con_imagen: {con_imagen}, secuencia: {}", row.secuencia);
         let result = if let Some(img) = img_opt {
             send_image_with_retry(&session_ref.client, &jid, img, &text, 2).await
