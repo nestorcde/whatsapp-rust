@@ -206,6 +206,12 @@ async fn fill_messages(
 
     let prompt = format!(
         "Genera {missing} mensaje(s) de marketing para WhatsApp con diversidad léxica. \
+        REGLAS IMPORTANTES: \
+        1) El sistema ya antepone automáticamente un saludo y el nombre del socio, por lo que el mensaje \
+        NO debe comenzar con ningún saludo ni referencia al destinatario (nada de 'Estimado socio', \
+        'Hola socio', 'Le informamos', ni similares al inicio). Comenzá directamente con el contenido. \
+        2) Si dentro del cuerpo del mensaje necesitás referirte al destinatario, usá siempre 'socio' \
+        (nunca cliente, miembro u otro término), porque es una cooperativa. \
         Mensajes existentes: {}. \
         Devuelve SOLO los mensajes faltantes, uno por línea, sin numeración ni explicaciones.",
         existing.join(" | ")
@@ -245,6 +251,12 @@ async fn rewrite_messages(
         "Reescribe los siguientes 3 mensajes de marketing para WhatsApp de manera que la \
         similitud léxica entre cualquier par sea menor al {umbral:.0}%. \
         Mantén el mismo tema y tono pero usa vocabulario y estructura muy diferentes. \
+        REGLAS IMPORTANTES: \
+        1) El sistema ya antepone automáticamente un saludo y el nombre del socio, por lo que cada mensaje \
+        NO debe comenzar con ningún saludo ni referencia al destinatario (nada de 'Estimado socio', \
+        'Hola socio', 'Le informamos', ni similares al inicio). Comenzá directamente con el contenido. \
+        2) Si dentro del cuerpo del mensaje necesitás referirte al destinatario, usá siempre 'socio' \
+        (nunca cliente, miembro u otro término), porque es una cooperativa. \
         Mensajes originales:\n1. {m1}\n2. {m2}\n3. {m3}\n\
         Devuelve EXACTAMENTE 3 mensajes, uno por línea, sin numeración ni explicaciones."
     );
